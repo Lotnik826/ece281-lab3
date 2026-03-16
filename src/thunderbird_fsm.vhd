@@ -35,20 +35,21 @@
 --|					Once a pattern starts, it finishes back at OFF before it 
 --|					can be changed by the inputs
 --|					
+
+--|                 One-Hot Encoding Table
+                    ----------------------
+                    
+--|                 |  State | S7  | S6  | S5  | S4  | S3  | S2  | S1  | S0  |
+--|                 | ------ | --- | --- | --- | --- | --- | --- | --- | --- |
+--|                 | OFF    | 1   | 0   | 0   | 0   | 0   | 0   | 0   | 0   |
+--|                 | ON     | 0   | 1   | 0   | 0   | 0   | 0   | 0   | 0   |
+--|                 | R1     | 0   | 0   | 1   | 0   | 0   | 0   | 0   | 0   |
+--|                 | R2     | 0   | 0   | 0   | 1   | 0   | 0   | 0   | 0   |
+--|                 | R3     | 0   | 0   | 0   | 0   | 1   | 0   | 0   | 0   |
+--|                 | L1     | 0   | 0   | 0   | 0   | 0   | 1   | 0   | 0   |
+--|                 | L2     | 0   | 0   | 0   | 0   | 0   | 0   | 1   | 0   |
+--|                 | L3     | 0   | 0   | 0   | 0   | 0   | 0   | 0   | 1   |
 --|
---|                 xxx State Encoding key
---|                 --------------------
---|                  State | Encoding
---|                 --------------------
---|                  OFF   | 
---|                  ON    | 
---|                  R1    | 
---|                  R2    | 
---|                  R3    | 
---|                  L1    | 
---|                  L2    | 
---|                  L3    | 
---|                 --------------------
 --|
 --|
 --+----------------------------------------------------------------------------
@@ -84,16 +85,28 @@
 library ieee;
   use ieee.std_logic_1164.all;
   use ieee.numeric_std.all;
+  
+  
  
-entity thunderbird_fsm is 
---  port(
-	
---  );
+entity thunderbird_fsm is
+    port (
+        i_clk, i_reset  : in    std_logic;
+        i_left, i_right : in    std_logic;
+        o_lights_L      : out   std_logic_vector(2 downto 0);
+        o_lights_R      : out   std_logic_vector(2 downto 0)
+    );
 end thunderbird_fsm;
 
 architecture thunderbird_fsm_arch of thunderbird_fsm is 
 
 -- CONSTANTS ------------------------------------------------------------------
+    --enum state types
+    type sm_state is (s_OFF, s_ON, s_R1, s_R2, s_R3, s_L1, s_L2, s_L3);
+    
+    --signals for current state and next state
+    signal f_Q, f_Q_next : sm_state;
+    
+    
   
 begin
 
@@ -102,7 +115,88 @@ begin
     ---------------------------------------------------------------------------------
 	
 	-- PROCESSES --------------------------------------------------------------------
+	
+    -----------------------------------------------------
+    --Handles clock and synchronus reset
+    register_proc : process (i_clk)
+    begin
+        if rising_edge(i_clk) then
+            if i_reset = '1' then	
+               f_Q <= s_OFF;
+            else
+                f_Q <= f_Q_next;
+            end if;
+        end if;
+    end process register_proc;
     
-	-----------------------------------------------------					   
+    --determines the next state based on current state and inputs
+    next_state_proc : process(f_Q, i_left, i_right)
+    begin
+        f_Q_next <= s_OFF;
+        
+        case f_Q is
+            when s_OFF =>
+                if i_left = '1' and i_right = '1' then
+                    f_Q_next <= s_ON;   --Hazards
+                elsif i_left = '1' and i_right = '0' then
+                    f_Q_next <= s_L1;   --Left Turn
+                elsif i_left = '0' and i_right = '1' then
+                    f_Q_next <= s_R1;   --Right Turn
+                else
+                    f_Q_next <= s_OFF;  --Off
+                end if;
+            
+            --Left Turn
+            when s_L1 => f_Q_next <= s_L2;
+            when s_L2 => f_Q_next <= s_L3;
+            when s_L3 => f_Q_next <= s_OFF;
+            
+            --Right Turn
+            when s_R1 => f_Q_next <= s_R2;
+            when s_R2 => f_Q_next <= s_R3;
+            when s_R3 => f_Q_next <= s_OFF;
+            
+            --Hazards
+            when s_ON => f_Q_next <= s_OFF;
+            
+            --else
+            when others => f_Q_next <= s_OFF;
+            
+          end case;
+    end process next_state_proc;
+    
+    output_proc : process (f_Q)
+    begin
+        
+        o_lights_L <= "000";
+        o_lights_R <= "000";
+        
+        case f_Q is
+            when s_OFF =>
+                o_lights_L <= "000";
+                o_lights_R <= "000";
+            when s_L1 =>
+                o_lights_L <= "001"; --LA
+            when s_L2 =>
+                o_lights_L <= "011"; --LA, LB
+            when s_L3 =>
+                o_lights_L <= "111"; --LA, LB, LC
+            when s_R1 =>
+                o_lights_R <= "001"; --RA
+            when s_R2 =>
+                o_lights_R <= "011"; --RA, RB
+            when s_R3 =>
+                o_lights_R <= "111"; --RA, RB, RC
+            when s_ON =>
+                o_lights_L <= "111"; --all left
+                o_lights_R <= "111"; --all right
+            when others =>
+                o_lights_L <= "000";
+                o_lights_R <= "000";
+            end case;
+    end process output_proc;
+                
+                  
+                    				   
 				  
 end thunderbird_fsm_arch;
